@@ -28,11 +28,13 @@ class TransformedPrimitive;
 class AnimatedPrimitive;
 class BVHAggregate;
 class KdTreeAggregate;
+class EmbreeAggregate;
 
 // Primitive Definition
 class Primitive
     : public TaggedPointer<SimplePrimitive, GeometricPrimitive, TransformedPrimitive,
-                           AnimatedPrimitive, BVHAggregate, KdTreeAggregate> {
+                           AnimatedPrimitive, BVHAggregate, KdTreeAggregate,
+                           EmbreeAggregate> {
   public:
     // Primitive Interface
     using TaggedPointer::TaggedPointer;
@@ -54,6 +56,7 @@ class GeometricPrimitive {
     Bounds3f Bounds() const;
     pstd::optional<ShapeIntersection> Intersect(const Ray &r, Float tMax) const;
     bool IntersectP(const Ray &r, Float tMax) const;
+    const Shape &GetShape() const { return shape; }
 
   private:
     // GeometricPrimitive Private Members
@@ -72,6 +75,7 @@ class SimplePrimitive {
     pstd::optional<ShapeIntersection> Intersect(const Ray &r, Float tMax) const;
     bool IntersectP(const Ray &r, Float tMax) const;
     SimplePrimitive(Shape shape, Material material);
+    const Shape &GetShape() const { return shape; }
 
   private:
     // SimplePrimitive Private Members

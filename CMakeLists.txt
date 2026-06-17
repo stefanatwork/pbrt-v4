@@ -67,6 +67,7 @@ check_ext ("OpenEXR" "openexr/src" f723c3940fff287c0a26b425b90a8e764823bfd4)
 check_ext ("OpenVDB" "openvdb/nanovdb" 414bed84c2fc22e188eac7b611aa85c7edd7a5a9)
 check_ext ("Ptex" "ptex/src" 054047d02b9e06e690420b407114d2872435b953)
 check_ext ("double-conversion" "double-conversion/cmake" cc1f75a114aca8d2af69f73a5a959aecbab0e87a)
+check_ext ("Embree" "embree" 7ba935978473a39e2357a0177829c1b740801426)
 check_ext ("filesystem" "filesystem/filesystem" c5f9de30142453eb3c6fe991e82dfc2583373116)
 check_ext ("glfw" "glfw/docs" 7b6aead9fb88b3623e3b3725ebb42670cbe4c579)
 check_ext ("libdeflate" "libdeflate/common" 1fd0bea6ca2073c68493632dafc4b1ddda1bcbc3)
@@ -103,9 +104,22 @@ endif ()
 
 set (BUILD_SHARED_LIBS OFF)
 
+# Build zlib first before looking for OpenEXR (which depends on it)
+if (NOT ZLIB_FOUND)
+  message (STATUS "Building zlib from source.")
+  add_subdirectory (src/ext/zlib)
+  set (ZLIB_LIBRARIES zlibstatic)
+  set (ZLIB_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/src/ext/zlib ${CMAKE_CURRENT_BINARY_DIR}/src/ext/zlib)
+  set (ZLIB_FOUND TRUE)
+  set (ZLIB_LIBRARY zlibstatic)
+  set (ZLIB_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/ext/zlib)
+  add_library (ZLIB::ZLIB ALIAS zlibstatic)
+endif ()
+
 add_subdirectory (${CMAKE_CURRENT_SOURCE_DIR}/src/ext)
 
-find_package(OpenEXR 3.1.1)
+# Try to find installed OpenEXR, but don't fail if not found (we'll build it)
+find_package(OpenEXR 3.1.1 QUIET)
 
 if (OPENEXR_FOUND)
   message (STATUS "Found OpenEXR version ${OPENEXR_VERSION}")
@@ -587,6 +601,7 @@ set (PBRT_SOURCE_HEADERS
 
 SET (PBRT_CPU_SOURCE
   src/pbrt/cpu/aggregates.cpp
+  src/pbrt/cpu/embree.cpp
   src/pbrt/cpu/integrators.cpp
   src/pbrt/cpu/primitive.cpp
   src/pbrt/cpu/render.cpp
@@ -594,6 +609,7 @@ SET (PBRT_CPU_SOURCE
 
 SET (PBRT_CPU_SOURCE_HEADERS
   src/pbrt/cpu/aggregates.h
+  src/pbrt/cpu/embree.h
   src/pbrt/cpu/integrators.h
   src/pbrt/cpu/primitive.h
   src/pbrt/cpu/render.h
@@ -870,6 +886,7 @@ target_include_directories (pbrt_lib PUBLIC
   ${QOI_INCLUDE}
   ${ZLIB_INCLUDE_DIRS}
   ${LIBDEFLATE_INCLUDE_DIRS}
+  ${EMBREE_INCLUDE}
   ${FILESYSTEM_INCLUDE}
   ${PTEX_INCLUDE}
   ${DOUBLE_CONVERSION_INCLUDE}
@@ -901,6 +918,7 @@ set (ALL_PBRT_LIBS
   Ptex_static
   ${ZLIB_LIBRARIES}
   ${LIBDEFLATE_LIBRARIES}
+  ${EMBREE_LIBRARIES}
   double-conversion
   ${PBRT_CUDA_LIB}
   utf8proc

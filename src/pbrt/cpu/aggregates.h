@@ -23,6 +23,7 @@ struct BVHBuildNode;
 struct BVHPrimitive;
 struct LinearBVHNode;
 struct MortonPrimitive;
+class EmbreeAggregate;
 
 // BVHAggregate Definition
 class BVHAggregate {

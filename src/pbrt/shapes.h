@@ -1049,6 +1049,11 @@ class Triangle {
     PBRT_CPU_GPU
     Float PDF(const Interaction &) const { return 1 / Area(); }
 
+    // Helper methods for Embree integration
+    int GetTriangleIndex() const { return triIndex; }
+    int GetMeshIndex() const { return meshIndex; }
+    const TriangleMesh *GetMeshForEmbree() const { return GetMesh(); }
+
     PBRT_CPU_GPU
     pstd::optional<ShapeSample> Sample(const ShapeSampleContext &ctx, Point2f u) const {
         // Get triangle vertices in _p0_, _p1_, and _p2_

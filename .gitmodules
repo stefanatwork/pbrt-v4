@@ -36,3 +36,6 @@
 	path = src/ext/glfw
 	url = https://github.com/glfw/glfw.git
 
+[submodule "src/ext/embree"]
+	path = src/ext/embree
+	url = https://github.com/embree/embree.git

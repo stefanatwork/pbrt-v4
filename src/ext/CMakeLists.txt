@@ -111,6 +111,25 @@ add_subdirectory (utf8proc)
 set (QOI_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/qoi PARENT_SCOPE)
 
 ###########################################################################
+# embree
+
+set (EMBREE_STATIC_LIB ON CACHE BOOL "" FORCE)
+set (EMBREE_TUTORIALS OFF CACHE BOOL "" FORCE)
+set (EMBREE_RAY_PACKETS OFF CACHE BOOL "" FORCE)
+set (EMBREE_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set (EMBREE_ISPC_SUPPORT OFF CACHE BOOL "" FORCE)
+set (EMBREE_TESTING_INSTALL_DEPENDENCIES OFF CACHE BOOL "" FORCE)
+set (EMBREE_ZIP_MODE OFF CACHE BOOL "" FORCE)
+set (EMBREE_TBB_SUPPORT OFF CACHE BOOL "" FORCE)
+
+add_subdirectory (embree)
+
+set (EMBREE_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/embree/include PARENT_SCOPE)
+set (EMBREE_LIBRARIES embree PARENT_SCOPE)
+
+set_property (TARGET embree PROPERTY FOLDER "ext")
+
+###########################################################################
 # glfw / glad
 
 set (GLFW_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/glfw/include PARENT_SCOPE)
