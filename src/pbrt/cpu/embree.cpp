@@ -16,6 +16,7 @@
 #include <embree4/rtcore_scene.h>
 
 #include <cassert>
+#include <cmath>
 
 namespace pbrt {
 
@@ -41,6 +42,15 @@ static const Triangle *GetTriangleShape(const Primitive &prim) {
             return shape.Cast<Triangle>();
     }
     return nullptr;
+}
+
+static Ray RayFromRTCRay(const RTCRay &ray) {
+    Ray r;
+    r.o = Point3f(ray.org_x, ray.org_y, ray.org_z);
+    r.d = Vector3f(ray.dir_x, ray.dir_y, ray.dir_z);
+    r.time = ray.time;
+    r.medium = nullptr;
+    return r;
 }
 
 static void UserPrimitiveBoundsFunc(const RTCBoundsFunctionArguments *args) {
@@ -105,6 +115,46 @@ static void UserPrimitiveOccludedFunc(const RTCOccludedFunctionNArguments *args)
         args->valid[0] = -1;
         ray->tfar = -Infinity;
     }
+}
+
+// Native triangle filter callback: reject hits that fail primitive-level tests
+// (e.g. alpha masking), while staying in Embree's traversal.
+static void TriangleIntersectFilterFunc(const RTCFilterFunctionNArguments *args) {
+    assert(args->N == 1);
+    if (!args->valid[0])
+        return;
+
+    RTCRay *ray = (RTCRay *)args->ray;
+    const EmbreeAccelerationStructure::GeometryData *geom =
+        static_cast<const EmbreeAccelerationStructure::GeometryData *>(args->geometryUserPtr);
+    if (!geom) {
+        args->valid[0] = 0;
+        return;
+    }
+
+    Ray r = RayFromRTCRay(*ray);
+    Float candidateTMax = std::nextafter(Float(ray->tfar), Infinity);
+    if (!geom->primitive.Intersect(r, candidateTMax))
+        args->valid[0] = 0;
+}
+
+static void TriangleOccludedFilterFunc(const RTCFilterFunctionNArguments *args) {
+    assert(args->N == 1);
+    if (!args->valid[0])
+        return;
+
+    RTCRay *ray = (RTCRay *)args->ray;
+    const EmbreeAccelerationStructure::GeometryData *geom =
+        static_cast<const EmbreeAccelerationStructure::GeometryData *>(args->geometryUserPtr);
+    if (!geom) {
+        args->valid[0] = 0;
+        return;
+    }
+
+    Ray r = RayFromRTCRay(*ray);
+    Float candidateTMax = std::nextafter(Float(ray->tfar), Infinity);
+    if (!geom->primitive.IntersectP(r, candidateTMax))
+        args->valid[0] = 0;
 }
 
 // EmbreeAccelerationStructure Implementation
@@ -179,6 +229,10 @@ EmbreeAccelerationStructure::EmbreeAccelerationStructure(
             indices[1] = 1;
             indices[2] = 2;
 
+            rtcSetGeometryUserData(rtcGeom, (void *)&geom);
+            rtcSetGeometryIntersectFilterFunction(rtcGeom, TriangleIntersectFilterFunc);
+            rtcSetGeometryOccludedFilterFunction(rtcGeom, TriangleOccludedFilterFunc);
+
             geom.nativeTriangle = true;
         } else {
             // Create user-defined geometry for non-Triangle primitives
@@ -219,8 +273,7 @@ pstd::optional<ShapeIntersection> EmbreeAccelerationStructure::Intersect(
         return {};
     }
 
-    // Prepare ray for Embree
-    struct RTCRayHit rayhit;
+    RTCRayHit rayhit;
     rayhit.ray.org_x = ray.o.x;
     rayhit.ray.org_y = ray.o.y;
     rayhit.ray.org_z = ray.o.z;
@@ -237,7 +290,6 @@ pstd::optional<ShapeIntersection> EmbreeAccelerationStructure::Intersect(
     rayhit.hit.primID = RTC_INVALID_GEOMETRY_ID;
     rayhit.hit.instID[0] = RTC_INVALID_GEOMETRY_ID;
 
-    // Trace ray through scene
     RTCIntersectArguments args;
     rtcInitIntersectArguments(&args);
     rtcIntersect1(scene, &rayhit, &args);
@@ -250,7 +302,8 @@ pstd::optional<ShapeIntersection> EmbreeAccelerationStructure::Intersect(
         return {};
 
     const GeometryData &geom = geometries[iter->second];
-    return geom.primitive.Intersect(ray, rayhit.ray.tfar);
+    Float candidateTMax = std::nextafter(Float(rayhit.ray.tfar), Infinity);
+    return geom.primitive.Intersect(ray, candidateTMax);
 }
 
 bool EmbreeAccelerationStructure::IntersectP(const Ray &ray, Float tMax) const {
@@ -258,8 +311,7 @@ bool EmbreeAccelerationStructure::IntersectP(const Ray &ray, Float tMax) const {
         return false;
     }
 
-    // Prepare ray for Embree
-    struct RTCRay rtcRay;
+    RTCRay rtcRay;
     rtcRay.org_x = ray.o.x;
     rtcRay.org_y = ray.o.y;
     rtcRay.org_z = ray.o.z;
@@ -273,7 +325,6 @@ bool EmbreeAccelerationStructure::IntersectP(const Ray &ray, Float tMax) const {
     rtcRay.time = ray.time;
     rtcRay.id = 0;
 
-    // Trace shadow ray through scene
     RTCOccludedArguments args;
     rtcInitOccludedArguments(&args);
     rtcOccluded1(scene, &rtcRay, &args);
@@ -332,5 +383,3 @@ bool EmbreeAggregate::IntersectP(const Ray &ray, Float tMax) const {
 }
 
 }  // namespace pbrt
-
-
