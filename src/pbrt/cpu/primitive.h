@@ -57,6 +57,7 @@ class GeometricPrimitive {
     pstd::optional<ShapeIntersection> Intersect(const Ray &r, Float tMax) const;
     bool IntersectP(const Ray &r, Float tMax) const;
     const Shape &GetShape() const { return shape; }
+    bool PassesAlphaTest(const ShapeIntersection &si, const Ray &r) const;
 
   private:
     // GeometricPrimitive Private Members

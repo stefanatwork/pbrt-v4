@@ -8,6 +8,7 @@
 #include <pbrt/paramdict.h>
 #include <pbrt/shapes.h>
 #include <pbrt/util/error.h>
+#include <pbrt/util/math.h>
 #include <pbrt/util/parallel.h>
 #include <pbrt/util/print.h>
 #include <pbrt/util/stats.h>
@@ -51,6 +52,43 @@ static Ray RayFromRTCRay(const RTCRay &ray) {
     r.time = ray.time;
     r.medium = nullptr;
     return r;
+}
+
+static bool TriangleHitPassesAlpha(const Primitive &prim, const RTCRay &rtcRay,
+                                   const RTCHit &rtcHit) {
+    if (!prim.Is<GeometricPrimitive>())
+        return true;
+
+    const GeometricPrimitive *gp = prim.Cast<GeometricPrimitive>();
+    const Shape &shape = gp->GetShape();
+    if (!shape.Is<Triangle>())
+        return true;
+
+    const Triangle *tri = shape.Cast<Triangle>();
+    const TriangleMesh *mesh = tri->GetMeshForEmbree();
+    if (!mesh)
+        return true;
+
+    int triIdx = tri->GetTriangleIndex();
+    const int *v = &mesh->vertexIndices[3 * triIdx];
+    Point3f p0 = mesh->p[v[0]];
+    Point3f p1 = mesh->p[v[1]];
+    Point3f p2 = mesh->p[v[2]];
+
+    TriangleIntersection ti;
+    ti.b1 = rtcHit.u;
+    ti.b2 = rtcHit.v;
+    ti.b0 = 1 - ti.b1 - ti.b2;
+    Point3f pHit = ti.b0 * p0 + ti.b1 * p1 + ti.b2 * p2;
+
+    Ray ray = RayFromRTCRay(rtcRay);
+    Float d2 = LengthSquared(ray.d);
+    Float tHit = (d2 > 0) ? Dot(pHit - ray.o, ray.d) / d2 : 0;
+    ti.t = tHit;
+    SurfaceInteraction intr =
+        Triangle::InteractionFromIntersection(mesh, triIdx, ti, ray.time, -ray.d);
+    ShapeIntersection si{intr, tHit};
+    return gp->PassesAlphaTest(si, ray);
 }
 
 static void UserPrimitiveBoundsFunc(const RTCBoundsFunctionArguments *args) {
@@ -117,33 +155,13 @@ static void UserPrimitiveOccludedFunc(const RTCOccludedFunctionNArguments *args)
     }
 }
 
-// Native triangle filter callback: reject hits that fail primitive-level tests
-// (e.g. alpha masking), while staying in Embree's traversal.
-static void TriangleIntersectFilterFunc(const RTCFilterFunctionNArguments *args) {
-    assert(args->N == 1);
-    if (!args->valid[0])
-        return;
-
-    RTCRay *ray = (RTCRay *)args->ray;
-    const EmbreeAccelerationStructure::GeometryData *geom =
-        static_cast<const EmbreeAccelerationStructure::GeometryData *>(args->geometryUserPtr);
-    if (!geom) {
-        args->valid[0] = 0;
-        return;
-    }
-
-    Ray r = RayFromRTCRay(*ray);
-    Float candidateTMax = std::nextafter(Float(ray->tfar), Infinity);
-    if (!geom->primitive.Intersect(r, candidateTMax))
-        args->valid[0] = 0;
-}
-
 static void TriangleOccludedFilterFunc(const RTCFilterFunctionNArguments *args) {
     assert(args->N == 1);
     if (!args->valid[0])
         return;
 
-    RTCRay *ray = (RTCRay *)args->ray;
+    RTCRay ray = rtcGetRayFromRayN(args->ray, args->N, 0);
+    RTCHit hit = rtcGetHitFromHitN(args->hit, args->N, 0);
     const EmbreeAccelerationStructure::GeometryData *geom =
         static_cast<const EmbreeAccelerationStructure::GeometryData *>(args->geometryUserPtr);
     if (!geom) {
@@ -151,9 +169,7 @@ static void TriangleOccludedFilterFunc(const RTCFilterFunctionNArguments *args) 
         return;
     }
 
-    Ray r = RayFromRTCRay(*ray);
-    Float candidateTMax = std::nextafter(Float(ray->tfar), Infinity);
-    if (!geom->primitive.IntersectP(r, candidateTMax))
+    if (!TriangleHitPassesAlpha(geom->primitive, ray, hit))
         args->valid[0] = 0;
 }
 
@@ -230,7 +246,6 @@ EmbreeAccelerationStructure::EmbreeAccelerationStructure(
             indices[2] = 2;
 
             rtcSetGeometryUserData(rtcGeom, (void *)&geom);
-            rtcSetGeometryIntersectFilterFunction(rtcGeom, TriangleIntersectFilterFunc);
             rtcSetGeometryOccludedFilterFunction(rtcGeom, TriangleOccludedFilterFunc);
 
             geom.nativeTriangle = true;
@@ -302,7 +317,8 @@ pstd::optional<ShapeIntersection> EmbreeAccelerationStructure::Intersect(
         return {};
 
     const GeometryData &geom = geometries[iter->second];
-    Float candidateTMax = std::nextafter(Float(rayhit.ray.tfar), Infinity);
+    Float candidateTMax = std::min(
+        tMax, Float(rayhit.ray.tfar) * (1 + 1e-4f) + 1e-6f);
     return geom.primitive.Intersect(ray, candidateTMax);
 }
 
@@ -318,7 +334,7 @@ bool EmbreeAccelerationStructure::IntersectP(const Ray &ray, Float tMax) const {
     rtcRay.dir_x = ray.d.x;
     rtcRay.dir_y = ray.d.y;
     rtcRay.dir_z = ray.d.z;
-    rtcRay.tnear = 0.0f;
+    rtcRay.tnear = ShadowEpsilon;
     rtcRay.tfar = tMax;
     rtcRay.mask = 0xFFFFFFFF;
     rtcRay.flags = 0;

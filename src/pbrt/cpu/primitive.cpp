@@ -48,6 +48,17 @@ Bounds3f GeometricPrimitive::Bounds() const {
     return shape.Bounds();
 }
 
+bool GeometricPrimitive::PassesAlphaTest(const ShapeIntersection &si, const Ray &r) const {
+    if (!alpha)
+        return true;
+    if (Float a = alpha.Evaluate(si.intr); a < 1) {
+        Float u = (a <= 0) ? 1.f : HashFloat(r.o, r.d);
+        if (u > a)
+            return false;
+    }
+    return true;
+}
+
 pstd::optional<ShapeIntersection> GeometricPrimitive::Intersect(const Ray &r,
                                                                 Float tMax) const {
     pstd::optional<ShapeIntersection> si = shape.Intersect(r, tMax);
@@ -55,20 +66,13 @@ pstd::optional<ShapeIntersection> GeometricPrimitive::Intersect(const Ray &r,
         return {};
     CHECK_LT(si->tHit, 1.001 * tMax);
     // Test intersection against alpha texture, if present
-    if (alpha) {
-        if (Float a = alpha.Evaluate(si->intr); a < 1) {
-            // Possibly ignore intersection based on stochastic alpha test
-            Float u = (a <= 0) ? 1.f : HashFloat(r.o, r.d);
-            if (u > a) {
-                // Ignore this intersection and trace a new ray
-                Ray rNext = si->intr.SpawnRay(r.d);
-                pstd::optional<ShapeIntersection> siNext =
-                    Intersect(rNext, tMax - si->tHit);
-                if (siNext)
-                    siNext->tHit += si->tHit;
-                return siNext;
-            }
-        }
+    if (!PassesAlphaTest(*si, r)) {
+        // Ignore this intersection and trace a new ray
+        Ray rNext = si->intr.SpawnRay(r.d);
+        pstd::optional<ShapeIntersection> siNext = Intersect(rNext, tMax - si->tHit);
+        if (siNext)
+            siNext->tHit += si->tHit;
+        return siNext;
     }
 
     // Initialize _SurfaceInteraction_ after _Shape_ intersection
