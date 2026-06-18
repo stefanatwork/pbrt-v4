@@ -19,8 +19,7 @@
 
 namespace pbrt {
 
-// Stats counter defined in aggregates.cpp
-extern int64_t rayShapeTests;
+STAT_COUNTER("Embree/Ray shape tests", rayShapeTests);
 
 // Error callback for Embree
 static void ErrorCallback(void *userPtr, enum RTCError error, const char *str) {
@@ -333,6 +332,5 @@ bool EmbreeAggregate::IntersectP(const Ray &ray, Float tMax) const {
 }
 
 }  // namespace pbrt
-
 
 

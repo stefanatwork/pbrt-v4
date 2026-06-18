@@ -107,13 +107,16 @@ set (BUILD_SHARED_LIBS OFF)
 # Build zlib first before looking for OpenEXR (which depends on it)
 if (NOT ZLIB_FOUND)
   message (STATUS "Building zlib from source.")
+  set (ZLIB_BUILD_STATIC_LIBS ON CACHE BOOL " " FORCE)
+  set (ZLIB_BUILD_SHARED_LIBS OFF CACHE BOOL " " FORCE)
   add_subdirectory (src/ext/zlib)
-  set (ZLIB_LIBRARIES zlibstatic)
+  set (ZLIB_LIBRARIES ${CMAKE_CURRENT_BINARY_DIR}/src/ext/zlib/zlibstatic.lib)
   set (ZLIB_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/src/ext/zlib ${CMAKE_CURRENT_BINARY_DIR}/src/ext/zlib)
+  set (ZLIB_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/ext/zlib ${CMAKE_CURRENT_BINARY_DIR}/src/ext/zlib CACHE STRING "Zlib include dir" FORCE)
+  set (ZLIB_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/src/ext/zlib ${CMAKE_CURRENT_BINARY_DIR}/src/ext/zlib CACHE STRING "Zlib include dirs" FORCE)
+  set (ZLIB_LIBRARY ${CMAKE_CURRENT_BINARY_DIR}/src/ext/zlib/zlibstatic.lib CACHE FILEPATH "Zlib library" FORCE)
+  set (ZLIB_LIBRARIES ${CMAKE_CURRENT_BINARY_DIR}/src/ext/zlib/zlibstatic.lib CACHE FILEPATH "Zlib libraries" FORCE)
   set (ZLIB_FOUND TRUE)
-  set (ZLIB_LIBRARY zlibstatic)
-  set (ZLIB_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/ext/zlib)
-  add_library (ZLIB::ZLIB ALIAS zlibstatic)
 endif ()
 
 add_subdirectory (${CMAKE_CURRENT_SOURCE_DIR}/src/ext)
@@ -885,6 +888,7 @@ target_include_directories (pbrt_lib PUBLIC
   ${STB_INCLUDE}
   ${QOI_INCLUDE}
   ${ZLIB_INCLUDE_DIRS}
+  ${CMAKE_CURRENT_BINARY_DIR}/src/ext/zlib
   ${LIBDEFLATE_INCLUDE_DIRS}
   ${EMBREE_INCLUDE}
   ${FILESYSTEM_INCLUDE}
@@ -916,7 +920,6 @@ set (ALL_PBRT_LIBS
   ${CMAKE_THREAD_LIBS_INIT}
   OpenEXR::OpenEXR
   Ptex_static
-  ${ZLIB_LIBRARIES}
   ${LIBDEFLATE_LIBRARIES}
   ${EMBREE_LIBRARIES}
   double-conversion

@@ -37,11 +37,11 @@ if (NOT ZLIB_FOUND)
   set (ZLIB_BUILD_SHARED_LIBS OFF CACHE BOOL " " FORCE)
   add_subdirectory (zlib)
 
-  set (ZLIB_LIBRARIES zlibstatic)
+  set (ZLIB_LIBRARIES ${CMAKE_CURRENT_BINARY_DIR}/zlib/zlibstatic.lib)
   set (ZLIB_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/zlib ${CMAKE_CURRENT_BINARY_DIR}/zlib)
 
   # try to make openexr happy about this...
-  set (ZLIB_LIBRARY zlibstatic)
+  set (ZLIB_LIBRARY ${CMAKE_CURRENT_BINARY_DIR}/zlib/zlibstatic.lib)
   set (ZLIB_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/zlib ${CMAKE_CURRENT_BINARY_DIR}/zlib)
   set (ZLIB_FOUND TRUE)
 
@@ -51,8 +51,14 @@ if (NOT ZLIB_FOUND)
   include_directories(${ZLIB_INCLUDE_DIRS})  # yuck, but so openexr/ptex can find zlib.h...
 endif ()
 
+if (TARGET zlibstatic)
+  # zconf.h is generated into the zlib build directory.
+  list (APPEND ZLIB_INCLUDE_DIRS ${CMAKE_BINARY_DIR}/src/ext/zlib)
+  list (REMOVE_DUPLICATES ZLIB_INCLUDE_DIRS)
+endif ()
+
 set (ZLIB_INCLUDE_DIRS ${ZLIB_INCLUDE_DIRS} PARENT_SCOPE)
-set (ZLIB_LIBRARIES ${ZLIB_LIBARIES} PARENT_SCOPE)
+set (ZLIB_LIBRARIES ${ZLIB_LIBRARIES} PARENT_SCOPE)
 
 ###########################################################################
 # openexr
@@ -145,4 +151,3 @@ add_subdirectory (glad)
 
 set_property (TARGET glfw PROPERTY FOLDER "ext")
 set_property (TARGET glad PROPERTY FOLDER "ext")
-
