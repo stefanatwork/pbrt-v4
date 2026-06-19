@@ -60,6 +60,47 @@ static const Curve *GetCurveShape(const Primitive &prim) {
     return nullptr;
 }
 
+static const TransformedPrimitive *GetTransformedPrimitive(const Primitive &prim) {
+    if (prim.Is<TransformedPrimitive>())
+        return prim.Cast<TransformedPrimitive>();
+    return nullptr;
+}
+
+struct PrimitiveKey {
+    int type;
+    const void *ptr;
+    bool operator==(const PrimitiveKey &other) const {
+        return type == other.type && ptr == other.ptr;
+    }
+};
+
+struct PrimitiveKeyHash {
+    size_t operator()(const PrimitiveKey &k) const {
+        size_t h1 = std::hash<int>{}(k.type);
+        size_t h2 = std::hash<const void *>{}(k.ptr);
+        return h1 ^ (h2 + 0x9e3779b9 + (h1 << 6) + (h1 >> 2));
+    }
+};
+
+static PrimitiveKey GetPrimitiveKey(const Primitive &p) {
+    if (p.Is<SimplePrimitive>())
+        return {0, p.Cast<SimplePrimitive>()};
+    if (p.Is<GeometricPrimitive>())
+        return {1, p.Cast<GeometricPrimitive>()};
+    if (p.Is<TransformedPrimitive>())
+        return {2, p.Cast<TransformedPrimitive>()};
+    if (p.Is<AnimatedPrimitive>())
+        return {3, p.Cast<AnimatedPrimitive>()};
+    if (p.Is<BVHAggregate>())
+        return {4, p.Cast<BVHAggregate>()};
+    if (p.Is<KdTreeAggregate>())
+        return {5, p.Cast<KdTreeAggregate>()};
+    if (p.Is<EmbreeAggregate>())
+        return {6, p.Cast<EmbreeAggregate>()};
+    LOG_FATAL("Unhandled Primitive type");
+    return {-1, nullptr};
+}
+
 static Ray RayFromRTCRay(const RTCRay &ray) {
     Ray r;
     r.o = Point3f(ray.org_x, ray.org_y, ray.org_z);
@@ -214,12 +255,7 @@ EmbreeAccelerationStructure::EmbreeAccelerationStructure(
     // Add primitives to scene, using native Embree geometries where possible
     geometries.reserve(prims.size());
 
-    for (size_t i = 0; i < prims.size(); ++i) {
-        geometries.push_back({});
-        GeometryData &geom = geometries.back();
-        geom.primitiveIndex = int(i);
-        geom.primitive = prims[i];
-
+    auto createNonInstancedGeometry = [&](GeometryData &geom) {
         RTCGeometry rtcGeom = nullptr;
         const Triangle *tri = GetTriangleShape(geom.primitive);
         const Curve *curve = GetCurveShape(geom.primitive);
@@ -320,7 +356,7 @@ EmbreeAccelerationStructure::EmbreeAccelerationStructure(
                 }
             }
         } else {
-            // Create user-defined geometry for non-Triangle primitives
+            // Create user-defined geometry for unsupported primitive types
             rtcGeom = rtcNewGeometry(device, RTC_GEOMETRY_TYPE_USER);
             if (!rtcGeom) {
                 ErrorExit("Failed to create Embree user geometry");
@@ -331,6 +367,57 @@ EmbreeAccelerationStructure::EmbreeAccelerationStructure(
             rtcSetGeometryBoundsFunction(rtcGeom, UserPrimitiveBoundsFunc, nullptr);
             rtcSetGeometryIntersectFunction(rtcGeom, UserPrimitiveIntersectFunc);
             rtcSetGeometryOccludedFunction(rtcGeom, UserPrimitiveOccludedFunc);
+        }
+        return rtcGeom;
+    };
+
+    std::unordered_map<PrimitiveKey, RTCScene, PrimitiveKeyHash> instanceSceneCache;
+    for (size_t i = 0; i < prims.size(); ++i) {
+        geometries.push_back({});
+        GeometryData &geom = geometries.back();
+        geom.primitiveIndex = int(i);
+        geom.primitive = prims[i];
+
+        RTCGeometry rtcGeom = nullptr;
+        const TransformedPrimitive *tp = GetTransformedPrimitive(geom.primitive);
+        if (tp && tp->GetRenderFromPrimitive()) {
+            const Primitive &instanceBase = tp->GetPrimitive();
+            PrimitiveKey key = GetPrimitiveKey(instanceBase);
+            auto iter = instanceSceneCache.find(key);
+            RTCScene childScene = nullptr;
+            if (iter == instanceSceneCache.end()) {
+                childScene = rtcNewScene(device);
+                if (!childScene)
+                    ErrorExit("Failed to create Embree instance scene");
+                rtcSetSceneFlags(childScene, RTC_SCENE_FLAG_ROBUST);
+
+                instanceGeometries.push_back({});
+                GeometryData &childGeom = instanceGeometries.back();
+                childGeom.primitiveIndex = -1;
+                childGeom.primitive = instanceBase;
+                RTCGeometry childRTCGeom = createNonInstancedGeometry(childGeom);
+                rtcCommitGeometry(childRTCGeom);
+                rtcAttachGeometry(childScene, childRTCGeom);
+                rtcReleaseGeometry(childRTCGeom);
+                rtcCommitScene(childScene);
+
+                instanceScenes.push_back(childScene);
+                instanceSceneCache[key] = childScene;
+            } else
+                childScene = iter->second;
+
+            rtcGeom = rtcNewGeometry(device, RTC_GEOMETRY_TYPE_INSTANCE);
+            if (!rtcGeom)
+                ErrorExit("Failed to create Embree instance geometry");
+            rtcSetGeometryInstancedScene(rtcGeom, childScene);
+            const SquareMatrix<4> &m = tp->GetRenderFromPrimitive()->GetMatrix();
+            float mColMajor[16] = {
+                m[0][0], m[1][0], m[2][0], m[3][0], m[0][1], m[1][1], m[2][1], m[3][1],
+                m[0][2], m[1][2], m[2][2], m[3][2], m[0][3], m[1][3], m[2][3], m[3][3]};
+            rtcSetGeometryTransform(rtcGeom, 0, RTC_FORMAT_FLOAT4X4_COLUMN_MAJOR,
+                                    mColMajor);
+        } else {
+            rtcGeom = createNonInstancedGeometry(geom);
         }
 
         rtcCommitGeometry(rtcGeom);
@@ -347,6 +434,8 @@ EmbreeAccelerationStructure::~EmbreeAccelerationStructure() {
     if (scene) {
         rtcReleaseScene(scene);
     }
+    for (RTCScene instanceScene : instanceScenes)
+        rtcReleaseScene(instanceScene);
     if (device) {
         rtcReleaseDevice(device);
     }

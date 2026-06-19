@@ -95,6 +95,8 @@ class TransformedPrimitive {
 
     pstd::optional<ShapeIntersection> Intersect(const Ray &r, Float tMax) const;
     bool IntersectP(const Ray &r, Float tMax) const;
+    const Primitive &GetPrimitive() const { return primitive; }
+    const Transform *GetRenderFromPrimitive() const { return renderFromPrimitive; }
 
     Bounds3f Bounds() const { return (*renderFromPrimitive)(primitive.Bounds()); }
 

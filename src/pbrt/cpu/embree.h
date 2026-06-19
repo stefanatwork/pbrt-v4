@@ -13,6 +13,7 @@
 #include <embree4/rtcore.h>
 
 #include <memory>
+#include <deque>
 #include <unordered_map>
 #include <vector>
 
@@ -37,6 +38,8 @@ class EmbreeAccelerationStructure {
 
   private:
     std::vector<GeometryData> geometries;
+    std::deque<GeometryData> instanceGeometries;
+    std::vector<RTCScene> instanceScenes;
     std::unordered_map<unsigned int, size_t> geomIDToIndex;
     RTCDevice device = nullptr;
     RTCScene scene = nullptr;
