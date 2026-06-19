@@ -45,6 +45,21 @@ static const Triangle *GetTriangleShape(const Primitive &prim) {
     return nullptr;
 }
 
+static const Curve *GetCurveShape(const Primitive &prim) {
+    if (prim.Is<GeometricPrimitive>()) {
+        const GeometricPrimitive *gp = prim.Cast<GeometricPrimitive>();
+        const Shape &shape = gp->GetShape();
+        if (shape.Is<Curve>())
+            return shape.Cast<Curve>();
+    } else if (prim.Is<SimplePrimitive>()) {
+        const SimplePrimitive *sp = prim.Cast<SimplePrimitive>();
+        const Shape &shape = sp->GetShape();
+        if (shape.Is<Curve>())
+            return shape.Cast<Curve>();
+    }
+    return nullptr;
+}
+
 static Ray RayFromRTCRay(const RTCRay &ray) {
     Ray r;
     r.o = Point3f(ray.org_x, ray.org_y, ray.org_z);
@@ -196,7 +211,7 @@ EmbreeAccelerationStructure::EmbreeAccelerationStructure(
     }
     rtcSetSceneFlags(scene, RTC_SCENE_FLAG_ROBUST);
 
-    // Add primitives to scene, using native triangle geometries where possible
+    // Add primitives to scene, using native Embree geometries where possible
     geometries.reserve(prims.size());
 
     for (size_t i = 0; i < prims.size(); ++i) {
@@ -207,6 +222,7 @@ EmbreeAccelerationStructure::EmbreeAccelerationStructure(
 
         RTCGeometry rtcGeom = nullptr;
         const Triangle *tri = GetTriangleShape(geom.primitive);
+        const Curve *curve = GetCurveShape(geom.primitive);
         if (tri) {
             // Create native triangle geometry for Triangle shapes
             rtcGeom = rtcNewGeometry(device, RTC_GEOMETRY_TYPE_TRIANGLE);
@@ -249,6 +265,60 @@ EmbreeAccelerationStructure::EmbreeAccelerationStructure(
             rtcSetGeometryOccludedFilterFunction(rtcGeom, TriangleOccludedFilterFunc);
 
             geom.nativeTriangle = true;
+        } else if (curve) {
+            RTCGeometryType curveType = RTC_GEOMETRY_TYPE_ROUND_BEZIER_CURVE;
+            switch (curve->GetType()) {
+            case CurveType::Cylinder:
+                // pbrt "cylinder" curves use a flat curve intersection and only
+                // apply a cylindrical normal model for shading.
+                curveType = RTC_GEOMETRY_TYPE_FLAT_BEZIER_CURVE;
+                break;
+            case CurveType::Flat:
+                curveType = RTC_GEOMETRY_TYPE_FLAT_BEZIER_CURVE;
+                break;
+            case CurveType::Ribbon:
+                curveType = RTC_GEOMETRY_TYPE_NORMAL_ORIENTED_BEZIER_CURVE;
+                break;
+            default:
+                ErrorExit("Unhandled curve type");
+            }
+
+            rtcGeom = rtcNewGeometry(device, curveType);
+            if (!rtcGeom) {
+                ErrorExit("Failed to create Embree curve geometry");
+            }
+
+            Point3f cp[4];
+            Float width[4];
+            curve->GetEmbreeControlPoints(cp);
+            curve->GetEmbreeWidths(width);
+
+            float *vertices = (float *)rtcSetNewGeometryBuffer(
+                rtcGeom, RTC_BUFFER_TYPE_VERTEX, 0, RTC_FORMAT_FLOAT4,
+                4 * sizeof(float), 4);
+            for (int j = 0; j < 4; ++j) {
+                vertices[4 * j + 0] = cp[j].x;
+                vertices[4 * j + 1] = cp[j].y;
+                vertices[4 * j + 2] = cp[j].z;
+                vertices[4 * j + 3] = 0.5f * width[j];
+            }
+
+            unsigned int *indices = (unsigned int *)rtcSetNewGeometryBuffer(
+                rtcGeom, RTC_BUFFER_TYPE_INDEX, 0, RTC_FORMAT_UINT,
+                sizeof(unsigned int), 1);
+            indices[0] = 0;
+            if (curve->GetType() == CurveType::Ribbon) {
+                Normal3f n[4];
+                curve->GetEmbreeNormals(n);
+                float *normals = (float *)rtcSetNewGeometryBuffer(
+                    rtcGeom, RTC_BUFFER_TYPE_NORMAL, 0, RTC_FORMAT_FLOAT3,
+                    3 * sizeof(float), 4);
+                for (int j = 0; j < 4; ++j) {
+                    normals[3 * j + 0] = n[j].x;
+                    normals[3 * j + 1] = n[j].y;
+                    normals[3 * j + 2] = n[j].z;
+                }
+            }
         } else {
             // Create user-defined geometry for non-Triangle primitives
             rtcGeom = rtcNewGeometry(device, RTC_GEOMETRY_TYPE_USER);

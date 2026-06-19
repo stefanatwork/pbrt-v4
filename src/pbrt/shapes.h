@@ -1252,6 +1252,11 @@ class Curve {
     Curve(const CurveCommon *common, Float uMin, Float uMax)
         : common(common), uMin(uMin), uMax(uMax) {}
 
+    CurveType GetType() const;
+    void GetEmbreeControlPoints(Point3f cpRender[4]) const;
+    void GetEmbreeWidths(Float width[4]) const;
+    void GetEmbreeNormals(Normal3f nRender[4]) const;
+
     PBRT_CPU_GPU
     DirectionCone NormalBounds() const { return DirectionCone::EntireSphere(); }
 

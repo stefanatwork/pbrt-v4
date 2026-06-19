@@ -758,6 +758,41 @@ std::string Curve::ToString() const {
     return StringPrintf("[ Curve common: %s uMin: %f uMax: %f ]", *common, uMin, uMax);
 }
 
+CurveType Curve::GetType() const {
+    return common->type;
+}
+
+void Curve::GetEmbreeControlPoints(Point3f cpRender[4]) const {
+    pstd::array<Point3f, 4> cpObj =
+        CubicBezierControlPoints(pstd::MakeConstSpan(common->cpObj), uMin, uMax);
+    for (int i = 0; i < 4; ++i)
+        cpRender[i] = (*common->renderFromObject)(cpObj[i]);
+}
+
+void Curve::GetEmbreeWidths(Float width[4]) const {
+    for (int i = 0; i < 4; ++i) {
+        Float u = Lerp(Float(i) / 3.f, uMin, uMax);
+        width[i] = Lerp(u, common->width[0], common->width[1]);
+    }
+}
+
+void Curve::GetEmbreeNormals(Normal3f nRender[4]) const {
+    CHECK_EQ(common->type, CurveType::Ribbon);
+    for (int i = 0; i < 4; ++i) {
+        Float u = Lerp(Float(i) / 3.f, uMin, uMax);
+        Normal3f nObj;
+        if (common->normalAngle == 0) {
+            nObj = common->n[0];
+        } else {
+            Float sin0 =
+                std::sin((1 - u) * common->normalAngle) * common->invSinNormalAngle;
+            Float sin1 = std::sin(u * common->normalAngle) * common->invSinNormalAngle;
+            nObj = sin0 * common->n[0] + sin1 * common->n[1];
+        }
+        nRender[i] = Normalize((*common->renderFromObject)(nObj));
+    }
+}
+
 pstd::vector<Shape> Curve::Create(const Transform *renderFromObject,
                                   const Transform *objectFromRender,
                                   bool reverseOrientation,
